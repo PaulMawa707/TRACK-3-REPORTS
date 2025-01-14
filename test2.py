@@ -7,6 +7,9 @@ import streamlit as st
 from sqlalchemy import create_engine
 import base64
 
+# Set the app layout to wide mode
+st.set_page_config(layout="wide")
+
 # Function to encode the background image in Base64
 def get_base64_image(image_path):
     with open(image_path, "rb") as image_file:
