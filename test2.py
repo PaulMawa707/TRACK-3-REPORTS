@@ -202,6 +202,7 @@ if group_file:
                 trips_df2.reset_index(drop=True, inplace=True) 
                 st.subheader("Trip Report")
                 st.dataframe(trips_df2)
+                st.subheader("Utilization Report")
                 st.dataframe(utilization)
                 
                 # Fetch Eco Driving Report
@@ -211,6 +212,7 @@ if group_file:
                 df2 = eco_df[eco_df['Violation'] != '-----']
                 events_pvt = df2.pivot_table(values='Count', index='Grouping', columns='Violation', fill_value=0, aggfunc='sum')
                 events_pvt.reset_index(inplace=True)
-                st.dataframe(df2)
                 st.subheader("Eco Driving Report")
+                st.dataframe(df2)
+                st.subheader("RAG Score Report")
                 st.dataframe(events_pvt)
