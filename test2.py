@@ -6,6 +6,7 @@ from datetime import datetime
 import streamlit as st
 from sqlalchemy import create_engine
 import base64
+import pytz
 
 # Set the app layout to wide mode
 st.set_page_config(layout="wide")
@@ -128,6 +129,20 @@ if group_file:
         from_date = st.date_input("From Date")
         to_date = st.date_input("To Date")
 
+        # Correct timezone for Nairobi
+        nairobi_tz = pytz.timezone('Africa/Nairobi')
+
+        # Localize the dates to Nairobi time
+        from_date = datetime.combine(from_date, datetime.min.time())
+        to_date = datetime.combine(to_date, datetime.max.time())
+
+        from_date = nairobi_tz.localize(from_date)
+        to_date = nairobi_tz.localize(to_date)
+
+        # Ensure both from_date and to_date are converted to pandas Timestamps for comparison
+        from_date = pd.Timestamp(from_date)
+        to_date = pd.Timestamp(to_date)
+
         if st.button("Fetch Reports"):
             if from_date and to_date:
                 from_datetime = datetime.combine(from_date, datetime.min.time())
@@ -138,18 +153,64 @@ if group_file:
                 trip_df = pd.read_excel(trip_report, engine="openpyxl", sheet_name="Trips")# For .xlsx files
                 # # Filter for trips where 'Count' is 1
                 trips_df2 = trip_df[trip_df['Count'] == 1].copy()
+                trips_df2['Beginning'] = pd.to_datetime(trips_df2.Beginning, format='%d.%m.%Y %H:%M:%S')
+                trips_df2['End'] = pd.to_datetime(trips_df2.End, format='%d.%m.%Y %H:%M:%S')
+
+                # Ensure that 'Beginning' and 'End' are timezone-aware and set to Nairobi time
+                trips_df2['Beginning'] = trips_df2['Beginning'].dt.tz_localize('Africa/Nairobi', ambiguous='NaT', nonexistent='NaT')
+                trips_df2['End'] = trips_df2['End'].dt.tz_localize('Africa/Nairobi', ambiguous='NaT', nonexistent='NaT')
+
+                # Filter trips that fall within the selected date range
+                trips_df2 = trips_df2[(trips_df2['Beginning'] >= from_date) & (trips_df2['End'] <= to_date)]
+                trips_df2.rename(columns={'Mileage':'Distance(KM)', 'Grouping':'Vehicle'}, inplace=True)
+                trips_df2['day'] = trips_df2.Beginning.dt.day
+                trips_df2['month'] = trips_df2.Beginning.dt.month
+                trips_df2['year'] = trips_df2.Beginning.dt.year
+                trips_df2['Duration'] = trips_df2.End - trips_df2.Beginning
+                utilization = pd.pivot_table(trips_df2, values='Distance(KM)', 
+                            index='Vehicle', columns=['year', 'month', 'day'],
+                            fill_value=0.0, aggfunc=sum)
+
+                def to_utilization_headers(date):
+                    return date.strftime('%a')[:1] + '-' + str(date.day)
+                columns = pd.to_datetime(utilization.columns.to_frame().reset_index(drop=True)).apply(to_utilization_headers)
+                utilization.columns = columns
+                days_with_trips = (utilization>0.0).sum(axis=1)
+                days_without_trips = (utilization==0.0).sum(axis=1)
+
+
+                daily_utilization = pd.pivot_table(trips_df2, values='Distance(KM)', 
+                                                        index='Vehicle', columns=trips_df2.Beginning.dt.day_name(),
+                                                        fill_value=0.0, aggfunc=sum
+                                                        )
+
+                Weekends = ['Saturday', 'Sunday']
+
+                weekdays = daily_utilization.columns.difference(Weekends)
+                weekends = daily_utilization.columns.intersection(Weekends)
+
+                utilization['Weekday Distance (km)'] = daily_utilization[weekdays].sum(axis=1)
+                utilization['Weekend Distance (km)'] = daily_utilization[weekends].sum(axis=1)
+                utilization['Total Distance (km)'] = daily_utilization.sum(axis=1)
+
+
+                utilization['Days With Trips'] = days_with_trips
+                utilization['Days Without Trips'] = days_without_trips
+                utilization.sort_values(by='Total Distance (km)', ascending=True, inplace=True)
 
                 # Reset index for cleaner output
                 trips_df2.reset_index(drop=True, inplace=True) 
                 st.subheader("Trip Report")
                 st.dataframe(trips_df2)
+                st.dataframe(utilization)
                 
                 # Fetch Eco Driving Report
                 eco_report = get_eco_driving_report(group_id, from_datetime, to_datetime, eco_template, eid)
                 eco_df = pd.read_excel(eco_report, engine="openpyxl", sheet_name="Eco driving")
                 eco_df['Count'] = 1
                 df2 = eco_df[eco_df['Violation'] != '-----']
-                st.subheader("Eco Driving Report")
+                events_pvt = df2.pivot_table(values='Count', index='Grouping', columns='Violation', fill_value=0, aggfunc='sum')
+                events_pvt.reset_index(inplace=True)
                 st.dataframe(df2)
-
-
+                st.subheader("Eco Driving Report")
+                st.dataframe(events_pvt)
