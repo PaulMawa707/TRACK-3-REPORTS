@@ -1,6 +1,7 @@
 # Import necessary libraries
 import pandas as pd
 import requests
+import io
 import json
 from datetime import datetime
 import streamlit as st
@@ -83,6 +84,29 @@ def get_eco_driving_report(ID, FROM, TO, eco_template, eid):
     requests.post(get_report_url)  # Trigger report execution
     r2 = requests.post(xl_url)  # Download report
     return r2.content
+
+def create_excel_file(utilization, df2, events_pvt, trips_df2, group_name):
+    # Convert timezone-aware datetime columns to timezone-unaware
+    for col in trips_df2.select_dtypes(include=["datetime64[ns, UTC]", "datetime64[ns]"]):
+        trips_df2[col] = trips_df2[col].dt.tz_localize(None)
+    
+    # Create Excel file
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        utilization.to_excel(writer, index=False, sheet_name="Utilization")
+        df2.to_excel(writer, index=False, sheet_name="Eco driving")
+        events_pvt.to_excel(writer, index=False, sheet_name="Scoring")
+        trips_df2.to_excel(writer, index=False, sheet_name="Trips")
+    
+    output.seek(0)
+    return output
+
+
+# Function to allow file download
+def download_excel_button(data, group_name):
+    b64 = base64.b64encode(data).decode()
+    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{group_name}_Report.xlsx">Download All Reports</a>'
+    st.markdown(href, unsafe_allow_html=True)
 
 # Function to get EID
 def get_eid():
@@ -197,6 +221,8 @@ if group_file:
                 utilization['Days With Trips'] = days_with_trips
                 utilization['Days Without Trips'] = days_without_trips
                 utilization.sort_values(by='Total Distance (km)', ascending=True, inplace=True)
+                # Reset index to include Vehicle as a column
+                utilization.reset_index(inplace=True)
 
                 # Reset index for cleaner output
                 trips_df2.reset_index(drop=True, inplace=True) 
@@ -216,3 +242,13 @@ if group_file:
                 st.dataframe(df2)
                 st.subheader("RAG Score Report")
                 st.dataframe(events_pvt)
+                # Generate the Excel file with all reports
+                excel_file = create_excel_file(utilization, df2, events_pvt, trips_df2, group_name)
+                # Convert all datetime columns to timezone-unaware
+                for col in trips_df2.select_dtypes(include=["datetime64[ns, UTC]", "datetime64[ns]"]):
+                    trips_df2[col] = trips_df2[col].dt.tz_localize(None)
+
+                # Add download button for the Excel file
+                st.subheader("Download All Reports")
+                download_excel_button(excel_file.read(), group_name)
+                
