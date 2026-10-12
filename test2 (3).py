@@ -486,6 +486,13 @@ if not group_data.empty:
                 trips_df2['month'] = trips_df2['Beginning'].dt.month
                 trips_df2['year'] = trips_df2['Beginning'].dt.year
 
+                # Wialon exports mileage as text ("12.3 km", "-----"). Coerce before summing.
+                if 'Mileage' in trips_df2.columns:
+                    mileage_text = trips_df2['Mileage'].astype(str).str.replace(r'[^0-9.\-]', '', regex=True)
+                    trips_df2['Mileage'] = pd.to_numeric(mileage_text, errors='coerce').fillna(0.0)
+                else:
+                    trips_df2['Mileage'] = 0.0
+
                 utilization = pd.pivot_table(trips_df2, values='Mileage',
                                              index='Grouping', columns=['year', 'month', 'day'],
                                              fill_value=0.0, aggfunc='sum').round(2)
@@ -498,6 +505,9 @@ if not group_data.empty:
                 except Exception:
                     utilization.columns = ['-'.join(map(str, c)) for c in utilization.columns]
 
+                day_columns = list(utilization.columns)
+                utilization[day_columns] = utilization[day_columns].apply(pd.to_numeric, errors='coerce').fillna(0.0)
+
                 daily_utilization = pd.pivot_table(trips_df2, values='Mileage', index='Grouping', columns=trips_df2.Beginning.dt.day_name(), fill_value=0.0, aggfunc='sum').round(2)
                 Weekends = ['Saturday', 'Sunday']
                 weekdays = daily_utilization.columns.difference(Weekends)
@@ -505,8 +515,8 @@ if not group_data.empty:
                 utilization['Weekday Distance (km)'] = daily_utilization[weekdays].sum(axis=1).round(2) if len(weekdays) > 0 else 0.0
                 utilization['Weekend Distance (km)'] = daily_utilization[weekends].sum(axis=1).round(2) if len(weekends) > 0 else 0.0
                 utilization['Total Distance (km)'] = daily_utilization.sum(axis=1).round(2)
-                days_with_trips = (utilization > 0.0).sum(axis=1)
-                days_without_trips = (utilization == 0.0).sum(axis=1)
+                days_with_trips = (utilization[day_columns] > 0.0).sum(axis=1)
+                days_without_trips = (utilization[day_columns] == 0.0).sum(axis=1)
                 utilization['Days With Trips'] = days_with_trips
                 utilization['Days Without Trips'] = days_without_trips
                 utilization.sort_values(by='Total Distance (km)', ascending=True, inplace=True)
